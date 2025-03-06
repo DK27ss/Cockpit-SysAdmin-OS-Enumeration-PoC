@@ -1,2 +1,2 @@
-# Cockpit-SysAdmin-Enumeration-PoC
-Cockpit-SysAdmin-Enumeration-PoC
+# Cockpit-SysAdmin-OS-Enumeration-PoC
+Cockpit-SysAdmin-OS-Enumeration-PoC
